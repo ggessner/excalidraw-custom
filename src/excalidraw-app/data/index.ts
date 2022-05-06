@@ -19,7 +19,7 @@ import {
 import { bytesToHexString } from "../../utils";
 import { FILE_UPLOAD_MAX_BYTES, ROOM_ID_BYTES } from "../app_constants";
 import { encodeFilesForUpload } from "./FileManager";
-import { saveFilesToFirebase } from "./firebase";
+import { saveFilesToFirebase } from "./storage";
 
 const BACKEND_V2_GET = process.env.REACT_APP_BACKEND_V2_GET_URL;
 const BACKEND_V2_POST = process.env.REACT_APP_BACKEND_V2_POST_URL;

@@ -8,98 +8,45 @@ import {
   BinaryFileMetadata,
   DataURL,
 } from "../../types";
-import { FILE_CACHE_MAX_AGE_SEC } from "../app_constants";
 import { decompressData } from "../../data/encode";
-import { encryptData, decryptData } from "../../data/encryption";
+import { decryptData, encryptData } from "../../data/encryption";
 import { MIME_TYPES } from "../../constants";
 import { reconcileElements } from "../collab/reconciliation";
+//import Keyv from 'keyv';
 
 // private
 // -----------------------------------------------------------------------------
-
-let FIREBASE_CONFIG: Record<string, any>;
+let MONGO_CONFIG: Record<string, any>;
 try {
-  FIREBASE_CONFIG = JSON.parse(process.env.REACT_APP_FIREBASE_CONFIG);
+  MONGO_CONFIG = JSON.parse(process.env.REACT_APP_MONGO_CONFIG);
 } catch (error: any) {
   console.warn(
-    `Error JSON parsing firebase config. Supplied value: ${process.env.REACT_APP_FIREBASE_CONFIG}`,
+    `Error JSON parsing mongo config. Supplied value: ${process.env.REACT_APP_MONGO_CONFIG}`,
   );
-  FIREBASE_CONFIG = {};
+  MONGO_CONFIG = {};
 }
 
-let firebasePromise: Promise<typeof import("firebase/app").default> | null =
-  null;
-let firestorePromise: Promise<any> | null | true = null;
-let firebaseStoragePromise: Promise<any> | null | true = null;
-
 let isFirebaseInitialized = false;
-
-const _loadFirebase = async () => {
-  const firebase = (
-    await import(/* webpackChunkName: "firebase" */ "firebase/app")
-  ).default;
-
-  if (!isFirebaseInitialized) {
-    try {
-      firebase.initializeApp(FIREBASE_CONFIG);
-    } catch (error: any) {
-      // trying initialize again throws. Usually this is harmless, and happens
-      // mainly in dev (HMR)
-      if (error.code === "app/duplicate-app") {
-        console.warn(error.name, error.code);
-      } else {
-        throw error;
-      }
-    }
-    isFirebaseInitialized = true;
-  }
-
-  return firebase;
-};
-
-const _getFirebase = async (): Promise<
-  typeof import("firebase/app").default
-> => {
-  if (!firebasePromise) {
-    firebasePromise = _loadFirebase();
-  }
-  return firebasePromise;
-};
+let client: Promise<any> | null = null;
 
 // -----------------------------------------------------------------------------
 
-const loadFirestore = async () => {
-  const firebase = await _getFirebase();
-  if (!firestorePromise) {
-    firestorePromise = import(
-      /* webpackChunkName: "firestore" */ "firebase/firestore"
-    );
-  }
-  if (firestorePromise !== true) {
-    await firestorePromise;
-    firestorePromise = true;
-  }
-  return firebase;
-};
-
 export const loadFirebaseStorage = async () => {
-  const firebase = await _getFirebase();
-  if (!firebaseStoragePromise) {
-    firebaseStoragePromise = import(
-      /* webpackChunkName: "storage" */ "firebase/storage"
-    );
+  if (!client) {
+    const uri = MONGO_CONFIG.uri;
+    console.warn(uri);
+    isFirebaseInitialized = true;
+    //client = Promise.resolve(new Keyv(uri));
+    client = Promise.resolve(null);
+    return client;
   }
-  if (firebaseStoragePromise !== true) {
-    await firebaseStoragePromise;
-    firebaseStoragePromise = true;
-  }
-  return firebase;
+  return client;
 };
 
-interface FirebaseStoredScene {
+interface StoredScene {
   sceneVersion: number;
-  iv: firebase.default.firestore.Blob;
-  ciphertext: firebase.default.firestore.Blob;
+  iv: Blob;
+  ciphertext: Blob;
 }
 
 const encryptElements = async (
@@ -114,11 +61,11 @@ const encryptElements = async (
 };
 
 const decryptElements = async (
-  data: FirebaseStoredScene,
+  data: StoredScene,
   roomKey: string,
 ): Promise<readonly ExcalidrawElement[]> => {
-  const ciphertext = data.ciphertext.toUint8Array();
-  const iv = data.iv.toUint8Array();
+  const ciphertext = await data.ciphertext.arrayBuffer();
+  const iv = new Uint8Array(await data.iv.arrayBuffer());
 
   const decrypted = await decryptData(iv, ciphertext, roomKey);
   const decodedData = new TextDecoder("utf-8").decode(
@@ -144,35 +91,29 @@ export const isSavedToFirebase = (
 };
 
 export const saveFilesToFirebase = async ({
-  prefix,
-  files,
-}: {
+                                            prefix,
+                                            files,
+                                          }: {
   prefix: string;
   files: { id: FileId; buffer: Uint8Array }[];
 }) => {
-  const firebase = await loadFirebaseStorage();
+  console.warn("DISABLED saveFilesToFirebase");
+  //const firebase = await loadFirebaseStorage();
 
   const erroredFiles = new Map<FileId, true>();
   const savedFiles = new Map<FileId, true>();
 
   await Promise.all(
     files.map(async ({ id, buffer }) => {
+      erroredFiles.set(id, true);
+      /*
       try {
-        await firebase
-          .storage()
-          .ref(`${prefix}/${id}`)
-          .put(
-            new Blob([buffer], {
-              type: MIME_TYPES.binary,
-            }),
-            {
-              cacheControl: `public, max-age=${FILE_CACHE_MAX_AGE_SEC}`,
-            },
-          );
+        await firebase.set(`${prefix}/${id}`, new Blob([buffer], { type: MIME_TYPES.binary }));
         savedFiles.set(id, true);
       } catch (error: any) {
         erroredFiles.set(id, true);
       }
+      */
     }),
   );
 
@@ -180,7 +121,6 @@ export const saveFilesToFirebase = async ({
 };
 
 const createFirebaseSceneDocument = async (
-  firebase: ResolutionType<typeof loadFirestore>,
   elements: readonly ExcalidrawElement[],
   roomKey: string,
 ) => {
@@ -188,11 +128,9 @@ const createFirebaseSceneDocument = async (
   const { ciphertext, iv } = await encryptElements(roomKey, elements);
   return {
     sceneVersion,
-    ciphertext: firebase.firestore.Blob.fromUint8Array(
-      new Uint8Array(ciphertext),
-    ),
-    iv: firebase.firestore.Blob.fromUint8Array(iv),
-  } as FirebaseStoredScene;
+    ciphertext: new Blob([ciphertext], { type: MIME_TYPES.binary }),
+    iv: new Blob([iv], { type: MIME_TYPES.binary }),
+  } as StoredScene;
 };
 
 export const saveToFirebase = async (
@@ -200,6 +138,7 @@ export const saveToFirebase = async (
   elements: readonly ExcalidrawElement[],
   appState: AppState,
 ) => {
+  console.warn("DISABLED saveToFirebase");
   const { roomId, roomKey, socket } = portal;
   if (
     // bail if no room exists as there's nothing we can do at this point
@@ -211,30 +150,24 @@ export const saveToFirebase = async (
     return false;
   }
 
-  const firebase = await loadFirestore();
-  const firestore = firebase.firestore();
+  return false;
+  /*
+  const firebase: Keyv = await loadFirebaseStorage();
 
-  const docRef = firestore.collection("scenes").doc(roomId);
+  const snapshot = await firebase.get(`scenes/${roomId}`);
+  if (!snapshot || !snapshot.exists) {
+    const sceneDocument = await createFirebaseSceneDocument(
+      elements,
+      roomKey,
+    );
 
-  const savedData = await firestore.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(docRef);
-
-    if (!snapshot.exists) {
-      const sceneDocument = await createFirebaseSceneDocument(
-        firebase,
-        elements,
-        roomKey,
-      );
-
-      transaction.set(docRef, sceneDocument);
-
-      return {
-        sceneVersion: sceneDocument.sceneVersion,
-        reconciledElements: null,
-      };
-    }
-
-    const prevDocData = snapshot.data() as FirebaseStoredScene;
+    await firebase.set(`scenes/${roomId}`, sceneDocument);
+    return {
+      sceneVersion: sceneDocument.sceneVersion,
+      reconciledElements: null,
+    };
+  } else {
+    const prevDocData = snapshot as StoredScene;
     const prevElements = await decryptElements(prevDocData, roomKey);
 
     const reconciledElements = reconcileElements(
@@ -244,21 +177,17 @@ export const saveToFirebase = async (
     );
 
     const sceneDocument = await createFirebaseSceneDocument(
-      firebase,
       reconciledElements,
       roomKey,
     );
 
-    transaction.update(docRef, sceneDocument);
+    await firebase.set(`scenes/${roomId}`, sceneDocument);
+    firebaseSceneVersionCache.set(socket, sceneDocument.sceneVersion);
     return {
       reconciledElements,
       sceneVersion: sceneDocument.sceneVersion,
     };
-  });
-
-  firebaseSceneVersionCache.set(socket, savedData.sceneVersion);
-
-  return savedData;
+  }*/
 };
 
 export const loadFromFirebase = async (
@@ -266,22 +195,21 @@ export const loadFromFirebase = async (
   roomKey: string,
   socket: SocketIOClient.Socket | null,
 ): Promise<readonly ExcalidrawElement[] | null> => {
-  const firebase = await loadFirestore();
-  const db = firebase.firestore();
-
-  const docRef = db.collection("scenes").doc(roomId);
-  const doc = await docRef.get();
-  if (!doc.exists) {
+  console.warn("DISABLED loadFromFirebase");
+  return null;
+  /*
+  const client : Keyv = await loadFirebaseStorage();
+  const snapshot = await client.get(`scenes/${roomId}`);
+  if (!snapshot || !snapshot.exists) {
     return null;
   }
-  const storedScene = doc.data() as FirebaseStoredScene;
+  const storedScene = snapshot as StoredScene;
   const elements = await decryptElements(storedScene, roomKey);
-
   if (socket) {
     firebaseSceneVersionCache.set(socket, getSceneVersion(elements));
   }
-
   return restoreElements(elements, null);
+  */
 };
 
 export const loadFilesFromFirebase = async (
@@ -291,16 +219,16 @@ export const loadFilesFromFirebase = async (
 ) => {
   const loadedFiles: BinaryFileData[] = [];
   const erroredFiles = new Map<FileId, true>();
-
+  console.warn("DISABLED loadFilesFromFirebase");
   await Promise.all(
     [...new Set(filesIds)].map(async (id) => {
       try {
-        const url = `https://firebasestorage.googleapis.com/v0/b/${
-          FIREBASE_CONFIG.storageBucket
-        }/o/${encodeURIComponent(prefix.replace(/^\//, ""))}%2F${id}`;
-        const response = await fetch(`${url}?alt=media`);
-        if (response.status < 400) {
-          const arrayBuffer = await response.arrayBuffer();
+        /*
+        const client : Keyv = await loadFirebaseStorage();
+        const file = await client.get(`${prefix}/${id}`);
+        if (file) {
+          const blob = file.data as Blob;
+          const arrayBuffer = await blob.arrayBuffer();
 
           const { data, metadata } = await decompressData<BinaryFileMetadata>(
             new Uint8Array(arrayBuffer),
@@ -310,7 +238,6 @@ export const loadFilesFromFirebase = async (
           );
 
           const dataURL = new TextDecoder().decode(data) as DataURL;
-
           loadedFiles.push({
             mimeType: metadata.mimeType || MIME_TYPES.binary,
             id,
@@ -320,6 +247,7 @@ export const loadFilesFromFirebase = async (
         } else {
           erroredFiles.set(id, true);
         }
+        */
       } catch (error: any) {
         erroredFiles.set(id, true);
         console.error(error);

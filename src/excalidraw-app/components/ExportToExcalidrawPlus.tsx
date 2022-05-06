@@ -2,7 +2,7 @@ import React from "react";
 import { Card } from "../../components/Card";
 import { ToolButton } from "../../components/ToolButton";
 import { serializeAsJSON } from "../../data/json";
-import { loadFirebaseStorage, saveFilesToFirebase } from "../data/firebase";
+import { loadFirebaseStorage, saveFilesToFirebase } from "../data/storage";
 import { FileId, NonDeletedExcalidrawElement } from "../../element/types";
 import { AppState, BinaryFileData, BinaryFiles } from "../../types";
 import { nanoid } from "nanoid";
@@ -38,14 +38,13 @@ const exportToExcalidrawPlus = async (
     },
   );
 
-  await firebase
-    .storage()
-    .ref(`/migrations/scenes/${id}`)
-    .put(blob, {
+  await firebase.set(`/migrations/scenes/${id}`,
+    {
+      data: blob,
       customMetadata: {
         data: JSON.stringify({ version: 2, name: appState.name }),
         created: Date.now().toString(),
-      },
+      }
     });
 
   const filesMap = new Map<FileId, BinaryFileData>();

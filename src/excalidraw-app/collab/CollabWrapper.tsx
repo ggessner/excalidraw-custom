@@ -38,7 +38,7 @@ import {
   loadFromFirebase,
   saveFilesToFirebase,
   saveToFirebase,
-} from "../data/mongo";
+} from "../data/storage";
 import {
   importUsernameFromLocalStorage,
   saveUsernameToLocalStorage,
@@ -234,6 +234,9 @@ class CollabWrapper extends PureComponent<Props, CollabState> {
   saveCollabRoomToFirebase = async (
     syncableElements: readonly ExcalidrawElement[],
   ) => {
+    console.warn("DISABLED saveCollabRoomToFirebase");
+    // DISABLED
+    /*
     try {
       const savedData = await saveToFirebase(
         this.portal,
@@ -249,6 +252,7 @@ class CollabWrapper extends PureComponent<Props, CollabState> {
     } catch (error: any) {
       console.error(error);
     }
+    */
   };
 
   openPortal = async () => {

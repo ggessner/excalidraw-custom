@@ -23,7 +23,7 @@ jest.mock("../excalidraw-app/data/index.ts", () => ({
   })),
 }));
 
-jest.mock("../excalidraw-app/data/firebase.ts", () => {
+jest.mock("../excalidraw-app/data/storage.ts", () => {
   const loadFromFirebase = async () => null;
   const saveToFirebase = () => {};
   const isSavedToFirebase = () => true;
